@@ -4,6 +4,8 @@
  * Handles all GitHub API calls for workflows
  */
 
+/// <reference types="vite/client" />
+
 // GitHub Configuration
 const GITHUB_API_BASE = 'https://api.github.com';
 const GITHUB_TOKEN = import.meta.env.VITE_GITHUB_TOKEN || '';
@@ -49,9 +51,23 @@ export interface ApiResponse<T> {
 }
 
 /**
+ * Check if GitHub is configured
+ */
+function isGitHubConfigured(): boolean {
+  return !!(GITHUB_TOKEN && GITHUB_OWNER && GITHUB_REPO);
+}
+
+/**
  * Make authenticated GitHub API request
  */
 async function githubFetch(endpoint: string, options: RequestInit = {}) {
+  // Check if GitHub is configured
+  if (!isGitHubConfigured()) {
+    throw new Error(
+      'GitHub not configured. Please set VITE_GITHUB_TOKEN, VITE_GITHUB_OWNER, and VITE_GITHUB_REPO in .env file.'
+    );
+  }
+
   const url = `${GITHUB_API_BASE}${endpoint}`;
 
   const headers = {
@@ -68,11 +84,22 @@ async function githubFetch(endpoint: string, options: RequestInit = {}) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json().catch(() => ({ message: response.statusText }));
       throw new Error(error.message || `GitHub API error: ${response.status}`);
     }
 
-    return await response.json();
+    // Handle 204 No Content responses (like workflow dispatch)
+    if (response.status === 204) {
+      return null;
+    }
+
+    // Only parse JSON if there's content
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      return await response.json();
+    }
+
+    return null;
   } catch (error: any) {
     console.error('GitHub API error:', error);
     throw error;
@@ -92,6 +119,7 @@ export async function triggerWorkflow(
 ): Promise<ApiResponse<void>> {
   try {
     console.log(`Triggering GitHub workflow: ${workflowFileName} on ${ref}`);
+    console.log(`URL: /repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/${workflowFileName}/dispatches`);
 
     await githubFetch(
       `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/${workflowFileName}/dispatches`,
@@ -104,11 +132,12 @@ export async function triggerWorkflow(
       }
     );
 
+    console.log('✅ Workflow triggered successfully');
     return {
       success: true,
     };
   } catch (error: any) {
-    console.error('Trigger workflow error:', error);
+    console.error('❌ Trigger workflow error:', error);
     return {
       success: false,
       error: error.message || 'Failed to trigger workflow',

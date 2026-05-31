@@ -85,7 +85,7 @@ const agents = [
 
 const approvals = [
   { id: "ap1", item: "PR #487 — feat: JWT refresh token rotation", workflow: "Development", agent: "Backend Developer", risk: "Medium", approver: "Sarah Chen", status: "pending" as Status, sla: "2h remaining" },
-  { id: "ap2", item: "Architecture Approval — Microservices v2 HLD", workflow: "Architecture", agent: "Solution Architect", risk: "High", approver: "James Park", status: "pending" as Status, sla: "6h remaining" },
+  { id: "ap2", item: "Architecture Approval — Microservices v2 HLD", workflow: "Architecture", agent: "Solution Architect", risk: "High", approver: "Abhay Kumar", status: "pending" as Status, sla: "6h remaining" },
   { id: "ap3", item: "Deploy release/v2.4.1 → Production", workflow: "Deployment", agent: "DevOps Agent", risk: "High", approver: "Emma Torres", status: "pending" as Status, sla: "1h remaining" },
   { id: "ap4", item: "Security Override — Auth Middleware OWASP A07", workflow: "Governance", agent: "Security Reviewer", risk: "Critical", approver: "Daniel Kim", status: "blocked" as Status, sla: "OVERDUE" },
   { id: "ap5", item: "PR #482 — refactor: payment service extraction", workflow: "Development", agent: "Backend Developer", risk: "Low", approver: "Sarah Chen", status: "completed" as Status, sla: "Approved 3h ago" },
@@ -538,6 +538,22 @@ function SprintCanvas({
   const displayEdges = activeRun ? activeRun.edges : workflowEdges;
   const workflowName = activeRun ? activeRun.name : "User Auth Module v2.4.1 — Sprint 14";
 
+  // Debug logging
+  if (activeRun) {
+    console.log('Live Runs - Active run:', activeRun.name);
+    console.log('Live Runs - Nodes:', displayNodes.length, displayNodes.map((n: any) => n.id));
+    console.log('Live Runs - Edges:', displayEdges.length, displayEdges);
+
+    // Check for edge ID mismatches
+    displayEdges.forEach((e: any) => {
+      const fromNode = displayNodes.find((n: any) => n.id === (e.from || e.fromId));
+      const toNode = displayNodes.find((n: any) => n.id === (e.to || e.toId));
+      if (!fromNode || !toNode) {
+        console.warn('Edge ID mismatch:', e, 'fromNode:', !!fromNode, 'toNode:', !!toNode);
+      }
+    });
+  }
+
   // Manual refresh GitHub status
   const handleRefresh = async () => {
     if (!activeRun || !activeRun.githubRunId || !onRefreshStatus) return;
@@ -553,12 +569,25 @@ function SprintCanvas({
   const selectedNode = displayNodes.find((n: any) => n.id === selected);
   const nodeColor: Record<string, string> = { strategic: "#3b82f6", engineering: "#22c55e", governance: "#f59e0b", operational: "#a855f7" };
   const statusFill: Record<Status, string> = { completed: "#22c55e", running: "#3b82f6", waiting: "#374151", failed: "#ef4444", blocked: "#f59e0b", retrying: "#a855f7", pending: "#6b7598" };
-  function nodeCenter(id: string) { const n = displayNodes.find((n: any) => n.id === id); return n ? { x: n.x + 64, y: n.y + 28 } : { x: 0, y: 0 }; }
+  function nodeCenter(id: string) {
+    const n = displayNodes.find((n: any) => n.id === id);
+    if (!n && activeRun) {
+      console.warn('nodeCenter: Node not found for ID:', id);
+    }
+    return n ? { x: n.x + 64, y: n.y + 28 } : { x: 0, y: 0 };
+  }
 
   return (
     <div className="p-4 h-full flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">{workflowName}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-muted-foreground">{workflowName}</p>
+          {!activeRun && (
+            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              Example Data
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <StatusBadge status={runState === "running" ? "running" : "waiting"} />
           <button onClick={() => setRunState(s => s === "running" ? "paused" : "running")} className={`px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition-colors ${runState === "running" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-blue-500/10 text-blue-400 border border-blue-500/20"}`}>
@@ -577,15 +606,75 @@ function SprintCanvas({
         </div>
       </div>
       <div className="flex gap-4 flex-1 min-h-0">
-        <div className="flex-1 bg-card border border-border rounded-lg overflow-auto relative">
-          <div className="absolute inset-0" style={{ backgroundImage: "radial-gradient(circle, rgba(148,163,184,0.06) 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
-          <svg width="1120" height="320" className="relative z-10">
+        <div className="flex-1 bg-card border border-border rounded-lg overflow-auto relative" style={{ backgroundImage: "radial-gradient(circle, rgba(148,163,184,0.06) 1px, transparent 1px)", backgroundSize: "24px 24px" }}>
+          <svg width="1120" height="320" className="relative z-10" style={{ minWidth: "1120px", minHeight: "320px" }}>
+            {/* SVG marker definitions for edge arrows */}
+            <defs>
+              {relationships.map(r => (
+                <marker key={r.type} id={`sprint-arrow-${r.type}`} markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+                  <path d="M0,0 L0,6 L8,3 z" fill={r.color} opacity={0.8} />
+                </marker>
+              ))}
+            </defs>
+
             {displayEdges.map((e: any, i: number) => {
-              const from = nodeCenter(e.from || e.fromId); const to = nodeCenter(e.to || e.toId);
-              const done = displayNodes.find((n: any) => n.id === (e.from || e.fromId))?.status === "completed";
+              const fromId = e.from || e.fromId;
+              const toId = e.to || e.toId;
+              const from = nodeCenter(fromId);
+              const to = nodeCenter(toId);
+              const done = displayNodes.find((n: any) => n.id === fromId)?.status === "completed";
+
+              // Skip if nodes not found (would render at 0,0)
+              if (from.x === 0 && from.y === 0 && to.x === 0 && to.y === 0) {
+                return null;
+              }
+
+              // Get relationship data
+              const relType = e.relationship || 'successor';
+              const rel = relationships.find(r => r.type === relType) ?? relationships[0];
+
+              // Calculate bezier curve (same as Workflow Designer)
+              const cx = (from.x + to.x) / 2;
+              const bezierPath = `M ${from.x} ${from.y} C ${cx} ${from.y} ${cx} ${to.y} ${to.x} ${to.y}`;
+
+              // Calculate midpoint for label
+              const midX = (from.x + to.x) / 2;
+              const midY = (from.y + to.y) / 2;
+
               return (
                 <g key={i}>
-                  <path d={`M ${from.x} ${from.y} C ${(from.x+to.x)/2} ${from.y} ${(from.x+to.x)/2} ${to.y} ${to.x} ${to.y}`} fill="none" stroke={done ? "rgba(34,197,94,0.4)" : "rgba(148,163,184,0.15)"} strokeWidth={1.5} strokeDasharray={done ? "0" : "6 3"} />
+                  <path
+                    d={bezierPath}
+                    fill="none"
+                    stroke={done ? "#22c55e" : rel.color}
+                    strokeWidth={done ? 2 : 1.5}
+                    strokeDasharray={done ? "0" : (rel.dash ? "6 3" : "0")}
+                    opacity={done ? 0.8 : 0.7}
+                    markerEnd={`url(#sprint-arrow-${rel.type})`}
+                  />
+                  {/* Edge label - relationship name */}
+                  <rect
+                    x={midX - 26}
+                    y={midY - 9}
+                    width={52}
+                    height={16}
+                    rx={4}
+                    fill="#ffffff"
+                    stroke={done ? "#22c55e" : rel.color}
+                    strokeWidth={1}
+                    opacity={1}
+                  />
+                  <text
+                    x={midX}
+                    y={midY + 2}
+                    textAnchor="middle"
+                    fontSize={8}
+                    fill={done ? "#22c55e" : rel.color}
+                    fontFamily="Inter, sans-serif"
+                    fontWeight={600}
+                  >
+                    {rel.label}
+                  </text>
                   {done && <circle cx={to.x} cy={to.y} r={3} fill="#22c55e" opacity={0.6} />}
                 </g>
               );
@@ -877,14 +966,51 @@ function WorkflowDesigner({ onLaunch }: { onLaunch: (run: any) => void }) {
 
       const fullWorkflow = response.data;
 
-      // Map nodes to live run format with status
-      const liveNodes = fullWorkflow.nodes.map((n: any, i: number) => ({
+      // Convert positions to numbers
+      const nodesWithPositions = fullWorkflow.nodes.map((n: any) => ({
+        ...n,
+        x: parseFloat(n.x) || 0,
+        y: parseFloat(n.y) || 0
+      }));
+
+      // Calculate bounding box of the workflow
+      const minX = Math.min(...nodesWithPositions.map((n: any) => n.x));
+      const maxX = Math.max(...nodesWithPositions.map((n: any) => n.x));
+      const minY = Math.min(...nodesWithPositions.map((n: any) => n.y));
+      const maxY = Math.max(...nodesWithPositions.map((n: any) => n.y));
+
+      const workflowWidth = maxX - minX + 128;  // Node width = 128
+      const workflowHeight = maxY - minY + 56;  // Node height = 56
+
+      // Target canvas size for Live Runs
+      const canvasWidth = 1120;
+      const canvasHeight = 320;
+
+      // Calculate scale to fit workflow in canvas (with padding)
+      const padding = 40;
+      const availableWidth = canvasWidth - padding * 2;
+      const availableHeight = canvasHeight - padding * 2;
+
+      const scaleX = availableWidth / workflowWidth;
+      const scaleY = availableHeight / workflowHeight;
+      const scale = Math.min(scaleX, scaleY, 1); // Don't scale up, only down
+
+      // Calculate offset to center the workflow
+      const scaledWidth = workflowWidth * scale;
+      const scaledHeight = workflowHeight * scale;
+      const offsetX = (canvasWidth - scaledWidth) / 2 - minX * scale;
+      const offsetY = (canvasHeight - scaledHeight) / 2 - minY * scale;
+
+      console.log(`Scaling workflow for Live Runs: scale=${scale.toFixed(2)}, offset=(${offsetX.toFixed(0)}, ${offsetY.toFixed(0)})`);
+
+      // Map nodes to live run format with status and scaled positions
+      const liveNodes = nodesWithPositions.map((n: any, i: number) => ({
         id: n.id,
         label: n.label,
         type: n.category?.toLowerCase() || "strategic",
         status: i === 0 ? "running" : "waiting",  // First node starts running
-        x: parseFloat(n.x) || 0,
-        y: parseFloat(n.y) || 0,
+        x: n.x * scale + offsetX,
+        y: n.y * scale + offsetY,
         artifacts: 0
       }));
 
@@ -918,7 +1044,7 @@ function WorkflowDesigner({ onLaunch }: { onLaunch: (run: any) => void }) {
         console.log('Triggering GitHub workflow: product-agent');
 
         // Trigger GitHub workflow
-        const githubResponse = await githubService.triggerWorkflow('product-agent.yml', 'main');
+        const githubResponse = await githubService.triggerWorkflow('product-agent1.yml', 'main');
 
         if (githubResponse.success) {
           alert(`🚀 Workflow "${wf.name}" launched!\n\n✅ Added to Live Runs\n⚙️ GitHub workflow "product-agent" triggered successfully`);
@@ -936,6 +1062,10 @@ function WorkflowDesigner({ onLaunch }: { onLaunch: (run: any) => void }) {
       onLaunch(liveRun);
 
       console.log('Workflow launched:', liveRun);
+      console.log(`Live run created with ${liveNodes.length} nodes and ${liveEdges.length} edges`);
+      console.log('Node IDs:', liveNodes.map(n => n.id));
+      console.log('Node positions:', liveNodes.map(n => `${n.label}: (${n.x.toFixed(0)}, ${n.y.toFixed(0)})`));
+      console.log('Edge connections:', liveEdges.map(e => `${e.fromId} -> ${e.toId}`));
     } catch (error: any) {
       console.error('Error launching workflow:', error);
       alert(`❌ Failed to launch workflow: ${error.message}`);
@@ -2338,10 +2468,10 @@ function TopNav({ active }: { active: ViewId }) {
 
       <div className="flex items-center gap-2 pl-2 border-l border-border">
         <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-[11px] font-bold text-white">
-          JP
+          AK
         </div>
         <div className="hidden sm:block">
-          <div className="text-xs font-medium text-foreground">James Park</div>
+          <div className="text-xs font-medium text-foreground">Abhay Kumar</div>
           <div className="text-[10px] text-muted-foreground">Solution Architect</div>
         </div>
       </div>
