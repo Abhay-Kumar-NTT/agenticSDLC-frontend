@@ -239,6 +239,72 @@ export async function deleteWorkflow(id: string): Promise<ApiResponse<void>> {
 }
 
 /**
+ * Start workflow execution (triggers sequential node execution on the backend)
+ */
+export async function executeWorkflow(id: string): Promise<ApiResponse<any>> {
+  try {
+    const response = await fetchWithTimeout(API_ENDPOINTS.WORKFLOW_EXECUTE(id), {
+      method: 'POST',
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Failed to start execution');
+    return data;
+  } catch (error: any) {
+    console.error('Execute workflow error:', error);
+    return { success: false, error: error.message || 'Failed to start execution' };
+  }
+}
+
+/**
+ * Get current execution state for a workflow (all node statuses)
+ */
+export async function getExecutionState(id: string): Promise<ApiResponse<any>> {
+  try {
+    const response = await fetchWithTimeout(API_ENDPOINTS.WORKFLOW_EXECUTION(id));
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Failed to fetch execution state');
+    return data;
+  } catch (error: any) {
+    console.error('Get execution state error:', error);
+    return { success: false, error: error.message || 'Failed to fetch execution state' };
+  }
+}
+
+/**
+ * Approve a human-in-loop node — resumes execution
+ */
+export async function approveNode(workflowId: string, nodeId: string): Promise<ApiResponse<any>> {
+  try {
+    const response = await fetchWithTimeout(API_ENDPOINTS.WORKFLOW_APPROVE(workflowId, nodeId), {
+      method: 'POST',
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Failed to approve node');
+    return data;
+  } catch (error: any) {
+    console.error('Approve node error:', error);
+    return { success: false, error: error.message || 'Failed to approve node' };
+  }
+}
+
+/**
+ * Reject a human-in-loop node — stops execution
+ */
+export async function rejectNode(workflowId: string, nodeId: string): Promise<ApiResponse<any>> {
+  try {
+    const response = await fetchWithTimeout(API_ENDPOINTS.WORKFLOW_REJECT(workflowId, nodeId), {
+      method: 'POST',
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Failed to reject node');
+    return data;
+  } catch (error: any) {
+    console.error('Reject node error:', error);
+    return { success: false, error: error.message || 'Failed to reject node' };
+  }
+}
+
+/**
  * Check API health
  */
 export async function checkHealth(): Promise<ApiResponse<any>> {
@@ -270,5 +336,9 @@ export default {
   updateWorkflow,
   updateWorkflowContent,
   deleteWorkflow,
+  executeWorkflow,
+  getExecutionState,
+  approveNode,
+  rejectNode,
   checkHealth,
 };

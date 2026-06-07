@@ -167,7 +167,15 @@ export function WorkflowDesigner({ onLaunch, connectedRepos }: { onLaunch: (run:
           color: node.color,
           x: node.x,
           y: node.y,
-          config: {}
+          config: {
+            inputs: {
+              ...(node.inputs || {}),
+              // map legacy repoToAnalyse into the canonical input key
+              ...(node.repoToAnalyse
+                ? { repository_url_or_path: node.repoToAnalyse }
+                : {}),
+            }
+          }
         })),
         edges: edges.map(edge => ({
           id: edge.id,
@@ -258,137 +266,76 @@ export function WorkflowDesigner({ onLaunch, connectedRepos }: { onLaunch: (run:
   // ── Launch workflow ──
   const launchWorkflow = async (wf: SavedWorkflow) => {
     try {
-      console.log('Launching workflow:', wf.name);
-
       // Fetch complete workflow data
       const response = await workflowService.getWorkflowById(wf.id);
-      if (!response.success || !response.data) {
-        throw new Error('Failed to load workflow details');
-      }
-
+      if (!response.success || !response.data) throw new Error('Failed to load workflow details');
       const fullWorkflow = response.data;
 
-      // Update workflow status to "active" in database
-      console.log('Updating workflow status to "active" in database...');
-      const updateResponse = await workflowService.updateWorkflow(wf.id, {
-        status: 'active',
-        metadata: {
-          ...fullWorkflow.metadata,
-          launchedAt: new Date().toISOString()
-        }
-      });
-
-      if (!updateResponse.success) {
-        console.warn('Failed to update workflow status in database:', updateResponse.error);
-        // Continue anyway - local state will still update
-      } else {
-        console.log('✅ Workflow status updated to "active" in database');
-      }
-
-      // Convert positions to numbers
+      // Scale nodes to fit the Live Runs canvas
       const nodesWithPositions = fullWorkflow.nodes.map((n: any) => ({
         ...n,
         x: parseFloat(n.x) || 0,
-        y: parseFloat(n.y) || 0
+        y: parseFloat(n.y) || 0,
       }));
 
-      // Calculate bounding box of the workflow
       const minX = Math.min(...nodesWithPositions.map((n: any) => n.x));
       const maxX = Math.max(...nodesWithPositions.map((n: any) => n.x));
       const minY = Math.min(...nodesWithPositions.map((n: any) => n.y));
       const maxY = Math.max(...nodesWithPositions.map((n: any) => n.y));
-
-      const workflowWidth = maxX - minX + 128;  // Node width = 128
-      const workflowHeight = maxY - minY + 56;  // Node height = 56
-
-      // Target canvas size for Live Runs
+      const workflowWidth = maxX - minX + 128;
+      const workflowHeight = maxY - minY + 56;
       const canvasWidth = 1120;
       const canvasHeight = 320;
-
-      // Calculate scale to fit workflow in canvas (with padding)
       const padding = 40;
-      const availableWidth = canvasWidth - padding * 2;
-      const availableHeight = canvasHeight - padding * 2;
-
-      const scaleX = availableWidth / workflowWidth;
-      const scaleY = availableHeight / workflowHeight;
-      const scale = Math.min(scaleX, scaleY, 1); // Don't scale up, only down
-
-      // Calculate offset to center the workflow
+      const scale = Math.min((canvasWidth - padding * 2) / workflowWidth, (canvasHeight - padding * 2) / workflowHeight, 1);
       const scaledWidth = workflowWidth * scale;
       const scaledHeight = workflowHeight * scale;
       const offsetX = (canvasWidth - scaledWidth) / 2 - minX * scale;
       const offsetY = (canvasHeight - scaledHeight) / 2 - minY * scale;
 
-      console.log(`Scaling workflow for Live Runs: scale=${scale.toFixed(2)}, offset=(${offsetX.toFixed(0)}, ${offsetY.toFixed(0)})`);
-
-      // Map nodes to live run format with status and scaled positions
-      const liveNodes = nodesWithPositions.map((n: any, i: number) => ({
+      const liveNodes = nodesWithPositions.map((n: any) => ({
         id: n.id,
         label: n.label,
-        type: n.category?.toLowerCase() || "strategic",
-        status: i === 0 ? "running" : "waiting",  // First node starts running
+        type: n.category?.toLowerCase() || 'strategic',
+        nodeType: n.type,
+        status: 'pending' as const,
         x: n.x * scale + offsetX,
         y: n.y * scale + offsetY,
-        artifacts: 0
+        artifacts: 0,
       }));
 
-      // Map edges to live run format
       const liveEdges = fullWorkflow.edges.map((e: any) => ({
         from: e.fromId,
         to: e.toId,
         fromId: e.fromId,
         toId: e.toId,
-        relationship: e.relationship || "successor"
+        relationship: e.relationship || 'successor',
       }));
 
-      // Create live run object
       const liveRun = {
         id: wf.id,
         name: wf.name,
         nodes: liveNodes,
         edges: liveEdges,
-        status: "running",
-        startedAt: new Date().toISOString()
+        status: 'running',
+        startedAt: new Date().toISOString(),
       };
 
-      // Update saved workflows status in local state
-      setSavedWorkflows(prev => prev.map(w =>
-        w.id === wf.id ? { ...w, status: "active" } : w
-      ));
+      // Push to Live Runs tab immediately
+      setSavedWorkflows(prev => prev.map(w => w.id === wf.id ? { ...w, status: 'active' } : w));
       setLaunchedId(wf.id);
-
-      // Add to live runs FIRST, then switch to Live Runs tab
       onLaunch(liveRun);
 
-      // Trigger GitHub workflow if first node is "Product Vision"
-      const firstNode = fullWorkflow.nodes[0];
-      if (firstNode && (firstNode.type === "product-vision" || firstNode.label === "Product Vision/Req.")) {
-        console.log('Triggering GitHub workflow: product-agent');
-
-        // Trigger GitHub workflow
-        const githubResponse = await githubService.triggerWorkflow('product-agent.yml', 'main');
-
-        if (githubResponse.success) {
-          alert(`🚀 Workflow "${wf.name}" launched!\n\n✅ Status: Running\n✅ Added to Live Runs\n⚙️ GitHub workflow "product-agent" triggered successfully`);
-
-          // Start polling for workflow status
-          pollWorkflowStatus(wf.id);
-        } else {
-          alert(`🚀 Workflow "${wf.name}" launched!\n\n✅ Status: Running\n✅ Added to Live Runs\n⚠️ GitHub workflow trigger failed: ${githubResponse.error}\n\nWorkflow will run locally only.`);
-        }
+      // Tell the backend to start sequential execution (triggers GitHub per node)
+      const execResponse = await workflowService.executeWorkflow(wf.id);
+      if (execResponse.success) {
+        console.log('Execution started:', execResponse.data);
       } else {
-        alert(`🚀 Workflow "${wf.name}" launched!\n\n✅ Status: Running\n✅ Added to Live Runs`);
+        console.warn('Backend execution start failed:', execResponse.error);
       }
-
-      console.log('Workflow launched:', liveRun);
-      console.log(`Live run created with ${liveNodes.length} nodes and ${liveEdges.length} edges`);
-      console.log('Node IDs:', liveNodes.map(n => n.id));
-      console.log('Node positions:', liveNodes.map(n => `${n.label}: (${n.x.toFixed(0)}, ${n.y.toFixed(0)})`));
-      console.log('Edge connections:', liveEdges.map(e => `${e.fromId} -> ${e.toId}`));
     } catch (error: any) {
       console.error('Error launching workflow:', error);
-      alert(`❌ Failed to launch workflow: ${error.message}`);
+      alert(`Failed to launch workflow: ${error.message}`);
     }
   };
 

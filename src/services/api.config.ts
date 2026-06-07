@@ -12,6 +12,10 @@ export const API_ENDPOINTS = {
   WORKFLOWS: `${API_BASE_URL}/api/workflows`,
   WORKFLOW_BY_ID: (id: string) => `${API_BASE_URL}/api/workflows/${id}`,
   WORKFLOW_CONTENT: (id: string) => `${API_BASE_URL}/api/workflows/${id}/content`,
+  WORKFLOW_EXECUTE: (id: string) => `${API_BASE_URL}/api/workflows/${id}/execute`,
+  WORKFLOW_EXECUTION: (id: string) => `${API_BASE_URL}/api/workflows/${id}/execution`,
+  WORKFLOW_APPROVE: (id: string, nodeId: string) => `${API_BASE_URL}/api/workflows/${id}/execution/approve/${nodeId}`,
+  WORKFLOW_REJECT: (id: string, nodeId: string) => `${API_BASE_URL}/api/workflows/${id}/execution/reject/${nodeId}`,
   HEALTH: `${API_BASE_URL}/health`,
 };
 

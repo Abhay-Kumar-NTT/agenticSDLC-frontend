@@ -16,20 +16,17 @@ import {
   NODE_W, NODE_H
 } from '../../config';
 import { StatusBadge } from '../common';
-import * as workflowService from '../../services/workflow.service';
-import * as githubService from '../../services/github.service';
-
-
 export function SprintCanvas({
   liveRuns,
-  onRefreshStatus
+  onApprove,
+  onReject,
 }: {
   liveRuns: Array<{ id: string; name: string; nodes: any[]; edges: any[]; status: string; startedAt: string; githubRunId?: number }>;
-  onRefreshStatus?: (runId: string, githubRunId: number) => void;
+  onApprove?: (runId: string, nodeId: string) => Promise<void>;
+  onReject?: (runId: string, nodeId: string) => Promise<void>;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [runState, setRunState] = useState<"running" | "paused">("running");
-  const [refreshing, setRefreshing] = useState(false);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [tempNodePositions, setTempNodePositions] = useState<Record<string, { x: number; y: number }>>({});
@@ -62,16 +59,18 @@ export function SprintCanvas({
     });
   }
 
-  // Manual refresh GitHub status
-  const handleRefresh = async () => {
-    if (!activeRun || !activeRun.githubRunId || !onRefreshStatus) return;
+  const [approvingNodeId, setApprovingNodeId] = useState<string | null>(null);
 
-    setRefreshing(true);
-    try {
-      await onRefreshStatus(activeRun.id, activeRun.githubRunId);
-    } finally {
-      setRefreshing(false);
-    }
+  const handleApprove = async (nodeId: string) => {
+    if (!activeRun || !onApprove) return;
+    setApprovingNodeId(nodeId);
+    try { await onApprove(activeRun.id, nodeId); } finally { setApprovingNodeId(null); }
+  };
+
+  const handleReject = async (nodeId: string) => {
+    if (!activeRun || !onReject) return;
+    setApprovingNodeId(nodeId);
+    try { await onReject(activeRun.id, nodeId); } finally { setApprovingNodeId(null); }
   };
 
   const selectedNode = displayNodes.find((n: any) => n.id === selected);
@@ -166,14 +165,6 @@ export function SprintCanvas({
           <StatusBadge status={runState === "running" ? "running" : "waiting"} />
           <button onClick={() => setRunState(s => s === "running" ? "paused" : "running")} className={`px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition-colors ${runState === "running" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-blue-500/10 text-blue-400 border border-blue-500/20"}`}>
             {runState === "running" ? <><Pause size={11} />Pause</> : <><Play size={11} />Resume</>}
-          </button>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing || !activeRun?.githubRunId}
-            className="px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 bg-muted text-muted-foreground border border-border hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <RefreshCw size={11} className={refreshing ? "animate-spin" : ""} />
-            {refreshing ? "Syncing..." : "Sync GitHub"}
           </button>
           <button className="px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 bg-muted text-muted-foreground border border-border hover:text-foreground transition-colors"><RotateCcw size={11} />Retry</button>
           <button className="px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 bg-muted text-muted-foreground border border-border hover:text-foreground transition-colors"><Eye size={11} />Logs</button>
@@ -327,10 +318,12 @@ export function SprintCanvas({
               );
             }
 
-            // Human-in-Loop: Small circular node
+            // Human-in-Loop: Small circular node with Approve/Reject when awaiting
             if (isHumanInLoop) {
               const circleSize = 70;
               const centerY = circleSize / 2;
+              const isAwaiting = node.status === 'blocked';
+              const isProcessing = approvingNodeId === node.id;
               return (
                 <div
                   key={node.id}
@@ -338,67 +331,61 @@ export function SprintCanvas({
                     position: "absolute",
                     left: node.x,
                     top: node.y,
-                    width: circleSize,
-                    height: circleSize,
+                    width: isAwaiting ? 160 : circleSize,
                     zIndex: isDragging ? 10 : 2,
                   }}
                   onMouseDown={e => startNodeDrag(e, node.id)}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelected(isSelected ? null : node.id);
-                  }}
+                  onClick={(e) => { e.stopPropagation(); setSelected(isSelected ? null : node.id); }}
                   title={node.label}
                 >
-                  {/* Circular background with icon and text inside */}
                   <div
-                    className={`rounded-full border-2 flex flex-col items-center justify-center gap-1 transition-all select-none cursor-grab active:cursor-grabbing
-                      ${isSelected ? "shadow-lg scale-110" : ""}
-                    `}
+                    className={`rounded-full border-2 flex flex-col items-center justify-center gap-1 transition-all select-none cursor-grab active:cursor-grabbing ${isSelected ? "shadow-lg scale-110" : ""}`}
                     style={{
                       width: circleSize,
                       height: circleSize,
-                      backgroundColor: isSelected ? `${col}30` : "#ffffff",
-                      borderColor: isSelected ? col : "rgba(100,116,139,0.3)",
+                      backgroundColor: isAwaiting ? "#fef3c720" : (isSelected ? `${col}30` : "#ffffff"),
+                      borderColor: isAwaiting ? "#f59e0b" : (isSelected ? col : "rgba(100,116,139,0.3)"),
                       padding: "4px"
                     }}
                   >
-                    {/* Human icon */}
                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" style={{ marginTop: "-4px" }}>
-                      <circle cx="12" cy="7" r="3.5" fill={col} />
-                      <path d="M12 12 C8.5 12 6 14 6 17 L6 20 L18 20 L18 17 C18 14 15.5 12 12 12 Z" fill={col} />
+                      <circle cx="12" cy="7" r="3.5" fill={isAwaiting ? "#f59e0b" : col} />
+                      <path d="M12 12 C8.5 12 6 14 6 17 L6 20 L18 20 L18 17 C18 14 15.5 12 12 12 Z" fill={isAwaiting ? "#f59e0b" : col} />
                     </svg>
-
-                    {/* Review text inside circle */}
-                    <div className="text-[9px] font-medium" style={{ color: col, marginTop: "-2px" }}>
-                      Review
+                    <div className="text-[9px] font-medium" style={{ color: isAwaiting ? "#f59e0b" : col, marginTop: "-2px" }}>
+                      {isAwaiting ? "Waiting" : "Review"}
                     </div>
                   </div>
 
-                  {/* Output port - positioned on right edge of circle at center */}
+                  {/* Approve/Reject buttons shown below circle when awaiting approval */}
+                  {isAwaiting && (
+                    <div className="flex gap-1 mt-1" style={{ width: 160 }}>
+                      <button
+                        disabled={isProcessing}
+                        onClick={(e) => { e.stopPropagation(); handleApprove(node.id); }}
+                        className="flex-1 py-1 rounded text-[10px] font-semibold bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 transition-colors disabled:opacity-50"
+                      >
+                        {isProcessing ? "…" : "Approve"}
+                      </button>
+                      <button
+                        disabled={isProcessing}
+                        onClick={(e) => { e.stopPropagation(); handleReject(node.id); }}
+                        className="flex-1 py-1 rounded text-[10px] font-semibold bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  )}
+
                   <div
                     className="absolute w-4 h-4 rounded-full border-2 flex items-center justify-center"
-                    style={{
-                      left: `${circleSize}px`,
-                      top: `${centerY}px`,
-                      transform: 'translate(-50%, -50%)',
-                      backgroundColor: "#ffffff",
-                      borderColor: col,
-                      pointerEvents: 'none'
-                    }}
+                    style={{ left: `${circleSize}px`, top: `${centerY}px`, transform: 'translate(-50%, -50%)', backgroundColor: "#ffffff", borderColor: col, pointerEvents: 'none' }}
                   >
                     <span className="w-0 h-0" style={{ borderTop: "3px solid transparent", borderBottom: "3px solid transparent", borderLeft: `4px solid ${col}` }} />
                   </div>
-                  {/* Input port - positioned on left edge of circle at center */}
                   <div
                     className="absolute w-3 h-3 rounded-full border-2"
-                    style={{
-                      left: '0px',
-                      top: `${centerY}px`,
-                      transform: 'translate(-50%, -50%)',
-                      backgroundColor: "#ffffff",
-                      borderColor: col,
-                      opacity: 0.8
-                    }}
+                    style={{ left: '0px', top: `${centerY}px`, transform: 'translate(-50%, -50%)', backgroundColor: "#ffffff", borderColor: col, opacity: 0.8 }}
                   />
                 </div>
               );
@@ -434,12 +421,11 @@ export function SprintCanvas({
                 <div className="text-[10px] mt-0.5 ml-4" style={{ color: col }}>{node.category || (node.type.charAt(0).toUpperCase()+node.type.slice(1))}</div>
 
                 {/* Status indicator - top right corner */}
-                {node.status === "running" && (
-                  <div className="absolute right-2 top-2 w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
-                )}
+                {node.status === "running"   && <div className="absolute right-2 top-2 w-2 h-2 rounded-full bg-orange-500 animate-pulse" />}
                 {node.status === "completed" && <div className="absolute right-2 top-2 w-2 h-2 rounded-full bg-green-500" />}
-                {node.status === "failed" && <div className="absolute right-2 top-2 w-2 h-2 rounded-full bg-red-500" />}
-                {node.status === "waiting" && <div className="absolute right-2 top-2 w-2 h-2 rounded-full bg-slate-400 opacity-50" />}
+                {node.status === "failed"    && <div className="absolute right-2 top-2 w-2 h-2 rounded-full bg-red-500" />}
+                {node.status === "blocked"   && <div className="absolute right-2 top-2 w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
+                {(node.status === "waiting" || node.status === "pending") && <div className="absolute right-2 top-2 w-2 h-2 rounded-full bg-slate-400 opacity-50" />}
               </div>
             );
           })}

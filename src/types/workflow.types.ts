@@ -8,7 +8,8 @@ export interface DesignerNode {
   color: string;
   x: number;
   y: number;
-  repoToAnalyse?: string; // For code-analysis and design-analysis nodes
+  repoToAnalyse?: string; // legacy — kept for code-analysis/design-analysis UI binding
+  inputs?: Record<string, string>; // generic node inputs passed to GitHub workflow dispatch
 }
 
 export interface DesignerEdge {
