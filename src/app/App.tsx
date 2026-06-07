@@ -16,7 +16,8 @@ import {
   ExternalLink, Cpu, AlertCircle, Circle, Terminal, Layers, GitMerge,
   MonitorDot, Gauge, ListChecks, GitCommit, ArrowRight, Workflow,
   SlidersHorizontal, ChevronUp, Minus, TriangleAlert, Info, Braces,
-  PackageCheck, Server, TrendingDown, Radio, Database, MapPin, Trash2
+  PackageCheck, Server, TrendingDown, Radio, Database, MapPin, Trash2,
+  Edit3, MessageSquare
 } from "lucide-react";
 import {
   AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip,
@@ -31,7 +32,7 @@ import * as repositoryService from "../services/repository.service";
 type ViewId =
   | "dashboard" | "discovery" | "planning" | "architecture" | "development"
   | "qa" | "deployment" | "observability" | "agents" | "workflows"
-  | "approvals" | "context-graph" | "repositories" | "issues"
+  | "approvals" | "context-graph" | "artifacts" | "repositories" | "issues"
   | "pull-requests" | "pipelines" | "policies" | "audit" | "security" | "settings";
 
 type Status = "running" | "completed" | "failed" | "waiting" | "blocked" | "retrying" | "pending";
@@ -74,6 +75,8 @@ const agents = [
   { id: "a1", name: "Product Strategist", type: "Strategic", status: "running" as Status, model: "claude-opus-4-7", cost: "$0.84", lastRun: "2m ago", approvalRequired: false, executions: 142 },
   { id: "a2", name: "Business Analyst", type: "Strategic", status: "completed" as Status, model: "claude-sonnet-4-6", cost: "$0.31", lastRun: "12m ago", approvalRequired: false, executions: 89 },
   { id: "a3", name: "Solution Architect", type: "Strategic", status: "waiting" as Status, model: "claude-opus-4-7", cost: "$1.24", lastRun: "18m ago", approvalRequired: true, executions: 67 },
+  { id: "a12", name: "Code Analyst", type: "Strategic", status: "completed" as Status, model: "claude-sonnet-4-6", cost: "$0.45", lastRun: "25m ago", approvalRequired: false, executions: 156 },
+  { id: "a13", name: "Design Analyst", type: "Strategic", status: "running" as Status, model: "claude-sonnet-4-6", cost: "$0.38", lastRun: "8m ago", approvalRequired: false, executions: 124 },
   { id: "a4", name: "Backend Developer", type: "Engineering", status: "running" as Status, model: "claude-sonnet-4-6", cost: "$0.52", lastRun: "5m ago", approvalRequired: false, executions: 318 },
   { id: "a5", name: "Frontend Developer", type: "Engineering", status: "completed" as Status, model: "claude-sonnet-4-6", cost: "$0.41", lastRun: "31m ago", approvalRequired: false, executions: 201 },
   { id: "a6", name: "QA Engineer", type: "Engineering", status: "running" as Status, model: "claude-haiku-4-5", cost: "$0.12", lastRun: "3m ago", approvalRequired: false, executions: 445 },
@@ -405,6 +408,7 @@ function DashboardView({ setView }: { setView: (v: ViewId) => void }) {
 interface DesignerNode {
   id: string; type: string; label: string; category: string;
   color: string; x: number; y: number;
+  repoToAnalyse?: string; // For code-analysis and design-analysis nodes
 }
 interface DesignerEdge {
   id: string; fromId: string; toId: string; relationship: string;
@@ -417,7 +421,7 @@ interface SavedWorkflow {
   nodeCount?: number;  // For summary view
   edgeCount?: number;  // For summary view
   createdAt: string;
-  status: "draft" | "active" | "paused";
+  status: "draft" | "active" | "paused" | "archived";
 }
 
 // ── Palette data ──
@@ -664,6 +668,28 @@ function SprintCanvas({
     setDraggingNodeId(null);
   };
 
+  // Helper functions for edge rendering - SAME as WorkflowDesigner
+  const portOut = (n: any) => {
+    const isCircular = n.type === "human-in-loop" || n.type === "ai-agent-reviewer";
+    if (isCircular) {
+      const circleSize = 70;
+      return { x: n.x + circleSize, y: n.y + circleSize / 2 };
+    }
+    return { x: n.x + NODE_W, y: n.y + NODE_H / 2 };
+  };
+  const portIn = (n: any) => {
+    const isCircular = n.type === "human-in-loop" || n.type === "ai-agent-reviewer";
+    if (isCircular) {
+      const circleSize = 70;
+      return { x: n.x, y: n.y + circleSize / 2 };
+    }
+    return { x: n.x, y: n.y + NODE_H / 2 };
+  };
+  const bezier = (x1: number, y1: number, x2: number, y2: number) => {
+    const cx = (x1 + x2) / 2;
+    return `M ${x1} ${y1} C ${cx} ${y1} ${cx} ${y2} ${x2} ${y2}`;
+  };
+
   return (
     <div className="p-4 h-full flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -693,20 +719,17 @@ function SprintCanvas({
         </div>
       </div>
       <div className="flex gap-4 flex-1 min-h-0">
-        <div className="flex-1 bg-card border border-border rounded-lg overflow-hidden relative" style={{ backgroundImage: "radial-gradient(circle, rgba(148,163,184,0.06) 1px, transparent 1px)", backgroundSize: "24px 24px" }}>
-          <svg
-            ref={canvasRef}
-            width="100%"
-            height="100%"
-            className="relative z-10"
-            style={{ cursor: draggingNodeId ? "grabbing" : "default" }}
-            viewBox="0 0 1120 320"
-            preserveAspectRatio="xMidYMid meet"
-            onMouseMove={handleNodeDrag}
-            onMouseUp={stopNodeDrag}
-            onMouseLeave={stopNodeDrag}
-          >
-            {/* SVG marker definitions for edge arrows */}
+        {/* Canvas container - EXACTLY like WorkflowDesigner */}
+        <div
+          ref={canvasRef}
+          className="flex-1 relative overflow-hidden border border-border rounded-lg"
+          style={{ backgroundImage: "radial-gradient(circle, rgba(148,163,184,0.15) 1px, transparent 1px)", backgroundSize: "24px 24px", backgroundColor: "#ffffff" }}
+          onMouseMove={handleNodeDrag}
+          onMouseUp={stopNodeDrag}
+          onMouseLeave={stopNodeDrag}
+        >
+          {/* SVG edge layer - SAME as WorkflowDesigner */}
+          <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 1 }}>
             <defs>
               {relationships.map(r => (
                 <marker key={r.type} id={`sprint-arrow-${r.type}`} markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
@@ -715,34 +738,24 @@ function SprintCanvas({
               ))}
             </defs>
 
+            {/* Drawn edges */}
             {displayEdges.map((e: any, i: number) => {
               const fromId = e.from || e.fromId;
               const toId = e.to || e.toId;
-              const from = nodeCenter(fromId);
-              const to = nodeCenter(toId);
-              const done = displayNodes.find((n: any) => n.id === fromId)?.status === "completed";
-
-              // Skip if nodes not found (would render at 0,0)
-              if (from.x === 0 && from.y === 0 && to.x === 0 && to.y === 0) {
-                return null;
-              }
-
-              // Get relationship data
-              const relType = e.relationship || 'successor';
-              const rel = relationships.find(r => r.type === relType) ?? relationships[0];
-
-              // Calculate bezier curve (same as Workflow Designer)
-              const cx = (from.x + to.x) / 2;
-              const bezierPath = `M ${from.x} ${from.y} C ${cx} ${from.y} ${cx} ${to.y} ${to.x} ${to.y}`;
-
-              // Calculate midpoint for label
+              const fn = displayNodes.find((n: any) => n.id === fromId);
+              const tn = displayNodes.find((n: any) => n.id === toId);
+              if (!fn || !tn) return null;
+              const from = portOut(fn);
+              const to = portIn(tn);
+              const rel = relationships.find(r => r.type === (e.relationship || 'successor')) ?? relationships[0];
+              const done = fn.status === "completed";
               const midX = (from.x + to.x) / 2;
               const midY = (from.y + to.y) / 2;
 
               return (
                 <g key={i}>
                   <path
-                    d={bezierPath}
+                    d={bezier(from.x, from.y, to.x, to.y)}
                     fill="none"
                     stroke={done ? "#22c55e" : rel.color}
                     strokeWidth={done ? 2 : 1.5}
@@ -750,192 +763,225 @@ function SprintCanvas({
                     opacity={done ? 0.8 : 0.7}
                     markerEnd={`url(#sprint-arrow-${rel.type})`}
                   />
-                  {/* Edge label - relationship name */}
-                  <rect
-                    x={midX - 26}
-                    y={midY - 9}
-                    width={52}
-                    height={16}
-                    rx={4}
-                    fill="#ffffff"
-                    stroke={done ? "#22c55e" : rel.color}
-                    strokeWidth={1}
-                    opacity={1}
-                  />
-                  <text
-                    x={midX}
-                    y={midY + 2}
-                    textAnchor="middle"
-                    fontSize={8}
-                    fill={done ? "#22c55e" : rel.color}
-                    fontFamily="Inter, sans-serif"
-                    fontWeight={600}
-                  >
-                    {rel.label}
-                  </text>
+                  <rect x={midX - 26} y={midY - 9} width={52} height={16} rx={4} fill="#ffffff" stroke={rel.color} strokeWidth={1} opacity={1} />
+                  <text x={midX} y={midY + 2} textAnchor="middle" fontSize={8} fill={rel.color} fontFamily="Inter, sans-serif" fontWeight={600}>{rel.label}</text>
                   {done && <circle cx={to.x} cy={to.y} r={3} fill="#22c55e" opacity={0.6} />}
                 </g>
               );
             })}
-            {displayNodes.map((node: any) => {
-              const isSelected = selected === node.id;
-              // Get color from node.color (from palette) or fallback to category/type mapping
-              const col = node.color || nodeColor[node.category] || nodeColor[node.type] || "#3b82f6";
-              const isDragging = draggingNodeId === node.id;
-              const isHumanInLoop = node.type === "human-in-loop";
-              const isAIAgentReviewer = node.type === "ai-agent-reviewer";
+          </svg>
 
-              // AI Agent Reviewer: Small circular node with AI/Bot icon
-              if (isAIAgentReviewer) {
-                const circleSize = 70;
-                const centerX = node.x + circleSize / 2;
-                const centerY = node.y + circleSize / 2;
+          {/* Node divs - EXACTLY like WorkflowDesigner */}
+          {displayNodes.map((node: any) => {
+            const isSelected = selected === node.id;
+            const col = node.color || nodeColor[node.category] || nodeColor[node.type] || "#3b82f6";
+            const isDragging = draggingNodeId === node.id;
+            const isHumanInLoop = node.type === "human-in-loop";
+            const isAIAgentReviewer = node.type === "ai-agent-reviewer";
 
-                return (
-                  <g
-                    key={node.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelected(isSelected ? null : node.id);
-                    }}
-                    onMouseDown={(e) => startNodeDrag(e, node.id)}
-                    className="cursor-grab active:cursor-grabbing"
-                    style={{ cursor: isDragging ? "grabbing" : "grab" }}
-                  >
-                    {/* Circular background */}
-                    <circle
-                      cx={centerX}
-                      cy={centerY}
-                      r={circleSize / 2}
-                      fill={isSelected ? `${col}30` : "#ffffff"}
-                      stroke={isSelected ? col : "rgba(100,116,139,0.3)"}
-                      strokeWidth={isSelected ? 2.5 : 2}
-                      opacity={isDragging ? 0.7 : 1}
-                    />
-
-                    {/* Modern AI Robot icon (positioned higher to make room for text) */}
-                    <g transform={`translate(${centerX - 10}, ${centerY - 14})`}>
-                      {/* Robot head with antenna */}
-                      <rect x="4" y="6" width="12" height="10" rx="2" fill={col} opacity="0.2" stroke={col} strokeWidth="1.5" />
-                      <circle cx="10" cy="4" r="1.5" fill={col} />
-                      <line x1="10" y1="4" x2="10" y2="6" stroke={col} strokeWidth="1.5" />
-                      {/* Eyes with glow effect */}
-                      <circle cx="7.5" cy="10" r="1.2" fill={col} />
-                      <circle cx="12.5" cy="10" r="1.2" fill={col} />
-                      {/* Circuit pattern mouth */}
-                      <path d="M6 13 L8 13 L8 14 L10 14 L10 13 L12 13 L12 14 L14 14" stroke={col} strokeWidth="1.2" fill="none" strokeLinecap="round" />
-                      {/* Side connections */}
-                      <line x1="4" y1="9" x2="2" y2="9" stroke={col} strokeWidth="1.5" />
-                      <line x1="16" y1="9" x2="18" y2="9" stroke={col} strokeWidth="1.5" />
-                    </g>
-
-                    {/* "AI Review" text inside circle, below icon */}
-                    <text
-                      x={centerX}
-                      y={centerY + 16}
-                      textAnchor="middle"
-                      fontSize={8}
-                      fontWeight={500}
-                      fill={col}
-                      fontFamily="Inter, sans-serif"
-                    >
-                      AI Review
-                    </text>
-
-                    {/* Status indicator on top-right */}
-                    {node.status === "running" && (
-                      <circle cx={centerX + 24} cy={centerY - 24} r={4} fill="#f97316" opacity={0.9}>
-                        <animate attributeName="opacity" values="0.9;0.3;0.9" dur="1.5s" repeatCount="indefinite" />
-                      </circle>
-                    )}
-                    {node.status === "completed" && <circle cx={centerX + 24} cy={centerY - 24} r={4} fill="#22c55e" opacity={0.9} />}
-                    {node.status === "failed" && <circle cx={centerX + 24} cy={centerY - 24} r={4} fill="#ef4444" opacity={0.9} />}
-                  </g>
-                );
-              }
-
-              // Human-in-Loop: Small circular node with "Review" text inside
-              if (isHumanInLoop) {
-                const circleSize = 70;
-                const centerX = node.x + circleSize / 2;
-                const centerY = node.y + circleSize / 2;
-
-                return (
-                  <g
-                    key={node.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelected(isSelected ? null : node.id);
-                    }}
-                    onMouseDown={(e) => startNodeDrag(e, node.id)}
-                    className="cursor-grab active:cursor-grabbing"
-                    style={{ cursor: isDragging ? "grabbing" : "grab" }}
-                  >
-                    {/* Circular background */}
-                    <circle
-                      cx={centerX}
-                      cy={centerY}
-                      r={circleSize / 2}
-                      fill={isSelected ? `${col}30` : "#ffffff"}
-                      stroke={isSelected ? col : "rgba(100,116,139,0.3)"}
-                      strokeWidth={isSelected ? 2.5 : 2}
-                      opacity={isDragging ? 0.7 : 1}
-                    />
-
-                    {/* Human icon (positioned higher to make room for text) */}
-                    <g transform={`translate(${centerX - 10}, ${centerY - 14})`}>
-                      <circle cx="10" cy="6" r="3.5" fill={col} />
-                      <path d="M10 11 C7.5 11 6 12.5 6 14.5 L6 17 L14 17 L14 14.5 C14 12.5 12.5 11 10 11 Z" fill={col} />
-                    </g>
-
-                    {/* "Review" text inside circle, below icon */}
-                    <text
-                      x={centerX}
-                      y={centerY + 16}
-                      textAnchor="middle"
-                      fontSize={8}
-                      fontWeight={500}
-                      fill={col}
-                      fontFamily="Inter, sans-serif"
-                    >
-                      Review
-                    </text>
-
-                    {/* Status indicator on top-right */}
-                    {node.status === "running" && (
-                      <circle cx={centerX + 24} cy={centerY - 24} r={4} fill="#f97316" opacity={0.9}>
-                        <animate attributeName="opacity" values="0.9;0.3;0.9" dur="1.5s" repeatCount="indefinite" />
-                      </circle>
-                    )}
-                    {node.status === "completed" && <circle cx={centerX + 24} cy={centerY - 24} r={4} fill="#22c55e" opacity={0.9} />}
-                    {node.status === "failed" && <circle cx={centerX + 24} cy={centerY - 24} r={4} fill="#ef4444" opacity={0.9} />}
-                  </g>
-                );
-              }
-
-              // Regular rectangular shape for other nodes
+            // AI Agent Reviewer: Small circular node with AI icon
+            if (isAIAgentReviewer) {
+              const circleSize = 70;
+              const centerY = circleSize / 2;
               return (
-                <g
+                <div
                   key={node.id}
+                  style={{
+                    position: "absolute",
+                    left: node.x,
+                    top: node.y,
+                    width: circleSize,
+                    height: circleSize,
+                    zIndex: isDragging ? 10 : 2,
+                  }}
+                  onMouseDown={e => startNodeDrag(e, node.id)}
                   onClick={(e) => {
                     e.stopPropagation();
                     setSelected(isSelected ? null : node.id);
                   }}
-                  onMouseDown={(e) => startNodeDrag(e, node.id)}
-                  className="cursor-grab active:cursor-grabbing"
-                  style={{ cursor: isDragging ? "grabbing" : "grab" }}
+                  title={node.label}
                 >
-                  <rect x={node.x} y={node.y} width={128} height={56} rx={8} fill={isSelected ? `${col}18` : "#ffffff"} stroke={isSelected ? col : "rgba(100,116,139,0.3)"} strokeWidth={isSelected ? 2 : 1} opacity={isDragging ? 0.7 : 1} />
-                  <circle cx={node.x+12} cy={node.y+20} r={4} fill={col} opacity={0.8} />
-                  <text x={node.x+22} y={node.y+24} fontSize={11} fontWeight={600} fill="#1e293b" fontFamily="Inter, sans-serif">{node.label.length > 14 ? node.label.substring(0,13)+"…" : node.label}</text>
-                  <text x={node.x+22} y={node.y+38} fontSize={9} fill={col} fontFamily="Inter, sans-serif">{node.category || (node.type.charAt(0).toUpperCase()+node.type.slice(1))}</text>
-                  {node.status === "running" && <circle cx={node.x+116} cy={node.y+12} r={4} fill="#f97316" opacity={0.9}><animate attributeName="opacity" values="0.9;0.3;0.9" dur="1.5s" repeatCount="indefinite" /></circle>}
-                  {node.status === "completed" && <circle cx={node.x+116} cy={node.y+12} r={4} fill="#22c55e" opacity={0.9} />}
-                  {node.status === "failed" && <circle cx={node.x+116} cy={node.y+12} r={4} fill="#ef4444" opacity={0.9} />}
-                </g>
+                  {/* Circular background with icon and text inside */}
+                  <div
+                    className={`rounded-full border-2 flex flex-col items-center justify-center gap-1 transition-all select-none cursor-grab active:cursor-grabbing
+                      ${isSelected ? "shadow-lg scale-110" : ""}
+                    `}
+                    style={{
+                      width: circleSize,
+                      height: circleSize,
+                      backgroundColor: isSelected ? `${col}30` : "#ffffff",
+                      borderColor: isSelected ? col : "rgba(100,116,139,0.3)",
+                      padding: "4px"
+                    }}
+                  >
+                    {/* Modern AI Robot icon */}
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" style={{ marginTop: "-4px" }}>
+                      {/* Robot head with antenna */}
+                      <rect x="6" y="8" width="12" height="10" rx="2" fill={col} opacity="0.2" stroke={col} strokeWidth="1.5" />
+                      <circle cx="12" cy="6" r="1.5" fill={col} />
+                      <line x1="12" y1="6" x2="12" y2="8" stroke={col} strokeWidth="1.5" />
+                      {/* Eyes with glow effect */}
+                      <circle cx="9.5" cy="12" r="1.2" fill={col} />
+                      <circle cx="14.5" cy="12" r="1.2" fill={col} />
+                      {/* Circuit pattern mouth */}
+                      <path d="M8 15 L10 15 L10 16 L12 16 L12 15 L14 15 L14 16 L16 16" stroke={col} strokeWidth="1.2" fill="none" strokeLinecap="round" />
+                      {/* Side connections */}
+                      <line x1="6" y1="11" x2="4" y2="11" stroke={col} strokeWidth="1.5" />
+                      <line x1="18" y1="11" x2="20" y2="11" stroke={col} strokeWidth="1.5" />
+                    </svg>
+
+                    {/* AI Review text inside circle */}
+                    <div className="text-[9px] font-medium" style={{ color: col, marginTop: "-2px" }}>
+                      AI Review
+                    </div>
+                  </div>
+
+                  {/* Output port - positioned on right edge of circle at center */}
+                  <div
+                    className="absolute w-4 h-4 rounded-full border-2 flex items-center justify-center"
+                    style={{
+                      left: `${circleSize}px`,
+                      top: `${centerY}px`,
+                      transform: 'translate(-50%, -50%)',
+                      backgroundColor: "#ffffff",
+                      borderColor: col,
+                      pointerEvents: 'none'
+                    }}
+                  >
+                    <span className="w-0 h-0" style={{ borderTop: "3px solid transparent", borderBottom: "3px solid transparent", borderLeft: `4px solid ${col}` }} />
+                  </div>
+                  {/* Input port - positioned on left edge of circle at center */}
+                  <div
+                    className="absolute w-3 h-3 rounded-full border-2"
+                    style={{
+                      left: '0px',
+                      top: `${centerY}px`,
+                      transform: 'translate(-50%, -50%)',
+                      backgroundColor: "#ffffff",
+                      borderColor: col,
+                      opacity: 0.8
+                    }}
+                  />
+                </div>
               );
-            })}
-          </svg>
+            }
+
+            // Human-in-Loop: Small circular node
+            if (isHumanInLoop) {
+              const circleSize = 70;
+              const centerY = circleSize / 2;
+              return (
+                <div
+                  key={node.id}
+                  style={{
+                    position: "absolute",
+                    left: node.x,
+                    top: node.y,
+                    width: circleSize,
+                    height: circleSize,
+                    zIndex: isDragging ? 10 : 2,
+                  }}
+                  onMouseDown={e => startNodeDrag(e, node.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelected(isSelected ? null : node.id);
+                  }}
+                  title={node.label}
+                >
+                  {/* Circular background with icon and text inside */}
+                  <div
+                    className={`rounded-full border-2 flex flex-col items-center justify-center gap-1 transition-all select-none cursor-grab active:cursor-grabbing
+                      ${isSelected ? "shadow-lg scale-110" : ""}
+                    `}
+                    style={{
+                      width: circleSize,
+                      height: circleSize,
+                      backgroundColor: isSelected ? `${col}30` : "#ffffff",
+                      borderColor: isSelected ? col : "rgba(100,116,139,0.3)",
+                      padding: "4px"
+                    }}
+                  >
+                    {/* Human icon */}
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" style={{ marginTop: "-4px" }}>
+                      <circle cx="12" cy="7" r="3.5" fill={col} />
+                      <path d="M12 12 C8.5 12 6 14 6 17 L6 20 L18 20 L18 17 C18 14 15.5 12 12 12 Z" fill={col} />
+                    </svg>
+
+                    {/* Review text inside circle */}
+                    <div className="text-[9px] font-medium" style={{ color: col, marginTop: "-2px" }}>
+                      Review
+                    </div>
+                  </div>
+
+                  {/* Output port - positioned on right edge of circle at center */}
+                  <div
+                    className="absolute w-4 h-4 rounded-full border-2 flex items-center justify-center"
+                    style={{
+                      left: `${circleSize}px`,
+                      top: `${centerY}px`,
+                      transform: 'translate(-50%, -50%)',
+                      backgroundColor: "#ffffff",
+                      borderColor: col,
+                      pointerEvents: 'none'
+                    }}
+                  >
+                    <span className="w-0 h-0" style={{ borderTop: "3px solid transparent", borderBottom: "3px solid transparent", borderLeft: `4px solid ${col}` }} />
+                  </div>
+                  {/* Input port - positioned on left edge of circle at center */}
+                  <div
+                    className="absolute w-3 h-3 rounded-full border-2"
+                    style={{
+                      left: '0px',
+                      top: `${centerY}px`,
+                      transform: 'translate(-50%, -50%)',
+                      backgroundColor: "#ffffff",
+                      borderColor: col,
+                      opacity: 0.8
+                    }}
+                  />
+                </div>
+              );
+            }
+
+            // Regular rectangular node
+            return (
+              <div
+                key={node.id}
+                style={{
+                  position: "absolute",
+                  left: node.x,
+                  top: node.y,
+                  width: NODE_W,
+                  height: NODE_H,
+                  zIndex: isDragging ? 10 : 2,
+                  backgroundColor: isSelected ? `${col}18` : "#ffffff",
+                  borderColor: isSelected ? col : "rgba(100,116,139,0.3)",
+                }}
+                className={`rounded-lg border flex flex-col justify-center px-3 transition-shadow select-none cursor-grab active:cursor-grabbing
+                  ${isSelected ? "shadow-lg" : ""}
+                `}
+                onMouseDown={e => startNodeDrag(e, node.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelected(isSelected ? null : node.id);
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: col }} />
+                  <span className="text-xs font-semibold truncate flex-1" style={{ color: "#1e293b" }}>{node.label}</span>
+                </div>
+                <div className="text-[10px] mt-0.5 ml-4" style={{ color: col }}>{node.category || (node.type.charAt(0).toUpperCase()+node.type.slice(1))}</div>
+
+                {/* Status indicator - top right corner */}
+                {node.status === "running" && (
+                  <div className="absolute right-2 top-2 w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+                )}
+                {node.status === "completed" && <div className="absolute right-2 top-2 w-2 h-2 rounded-full bg-green-500" />}
+                {node.status === "failed" && <div className="absolute right-2 top-2 w-2 h-2 rounded-full bg-red-500" />}
+                {node.status === "waiting" && <div className="absolute right-2 top-2 w-2 h-2 rounded-full bg-slate-400 opacity-50" />}
+              </div>
+            );
+          })}
         </div>
         <div className="w-56 bg-card border border-border rounded-lg p-3 flex flex-col gap-3 text-xs">
           {selectedNode ? (
@@ -962,7 +1008,7 @@ function SprintCanvas({
 }
 
 // ── Workflow Designer ──
-function WorkflowDesigner({ onLaunch }: { onLaunch: (run: any) => void }) {
+function WorkflowDesigner({ onLaunch, connectedRepos }: { onLaunch: (run: any) => void; connectedRepos: any[] }) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasNodes, setCanvasNodes] = useState<DesignerNode[]>([]);
   const [edges, setEdges] = useState<DesignerEdge[]>([]);
@@ -1882,6 +1928,46 @@ function WorkflowDesigner({ onLaunch }: { onLaunch: (run: any) => void }) {
                   <span className="text-sm font-semibold text-foreground">{selectedNode.label}</span>
                 </div>
                 <div className="text-xs px-2 py-1 rounded" style={{ backgroundColor: `${selectedNode.color}15`, color: selectedNode.color }}>{selectedNode.category}</div>
+
+                {/* Configuration section for code-analysis and design-analysis nodes */}
+                {(selectedNode.type === "code-analysis" || selectedNode.type === "design-analysis") && (
+                  <>
+                    <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium pt-2">Configuration</div>
+
+                    {/* Agent property */}
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Agent</label>
+                      <div className="bg-muted border border-border rounded-md px-2 py-1.5 text-xs text-foreground">
+                        {selectedNode.type === "code-analysis" ? "Code Analyst" : "Design Analyst"}
+                      </div>
+                    </div>
+
+                    {/* Repo to Analyse dropdown */}
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Repo to Analyse</label>
+                      <select
+                        value={selectedNode.repoToAnalyse || ""}
+                        onChange={(e) => {
+                          setCanvasNodes(prev => prev.map(n =>
+                            n.id === selectedNode.id ? { ...n, repoToAnalyse: e.target.value } : n
+                          ));
+                        }}
+                        className="w-full bg-muted border border-border rounded-md px-2 py-1.5 text-xs text-foreground outline-none focus:border-primary"
+                      >
+                        <option value="">Select a repository</option>
+                        {connectedRepos.map(repo => (
+                          <option key={repo.id} value={repo.fullName || `${repo.owner}/${repo.name}`}>
+                            {repo.fullName || `${repo.owner}/${repo.name}`}
+                          </option>
+                        ))}
+                      </select>
+                      {connectedRepos.length === 0 && (
+                        <p className="text-[10px] text-amber-400 italic">No repositories connected. Connect repositories in GitHub Operations.</p>
+                      )}
+                    </div>
+                  </>
+                )}
+
                 <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium pt-1">Outgoing edges</div>
                 {edges.filter(e => e.fromId === selectedNode.id).length === 0
                   ? <p className="text-xs text-muted-foreground italic">No outgoing connections</p>
@@ -2084,6 +2170,131 @@ function WorkflowDesigner({ onLaunch }: { onLaunch: (run: any) => void }) {
 function WorkflowsView() {
   const [tab, setTab] = useState<"live" | "designer">("designer");
   const [liveRuns, setLiveRuns] = useState<Array<{ id: string; name: string; nodes: any[]; edges: any[]; status: string; startedAt: string; githubRunId?: number }>>([]);
+  const [connectedRepos, setConnectedRepos] = useState<any[]>([]);
+
+  // Load connected repositories on component mount
+  useEffect(() => {
+    const loadRepositories = async () => {
+      try {
+        const response = await repositoryService.getAllRepositories();
+        if (response.success && response.data) {
+          setConnectedRepos(response.data);
+        }
+      } catch (error) {
+        console.error('Error loading repositories:', error);
+      }
+    };
+    loadRepositories();
+  }, []);
+
+  // Load active workflows on component mount
+  useEffect(() => {
+    const loadActiveWorkflows = async () => {
+      try {
+        console.log('Loading active workflows from database...');
+        const response = await workflowService.getAllWorkflows();
+
+        if (response.success && response.data) {
+          // Filter for active workflows only
+          const activeWorkflows = response.data.filter((wf: any) => wf.status === 'active');
+
+          if (activeWorkflows.length === 0) {
+            console.log('No active workflows found');
+            return;
+          }
+
+          console.log(`Found ${activeWorkflows.length} active workflows`);
+
+          // Switch to Live Runs tab if there are active workflows
+          setTab("live");
+
+          // Load full details for each active workflow and convert to live runs
+          const liveRunsPromises = activeWorkflows.map(async (wf: any) => {
+            try {
+              const detailResponse = await workflowService.getWorkflowById(wf.id);
+              if (!detailResponse.success || !detailResponse.data) {
+                console.warn(`Failed to load details for workflow ${wf.id}`);
+                return null;
+              }
+
+              const fullWorkflow = detailResponse.data;
+
+              // Convert positions to numbers
+              const nodesWithPositions = fullWorkflow.nodes.map((n: any) => ({
+                ...n,
+                x: parseFloat(n.x) || 0,
+                y: parseFloat(n.y) || 0
+              }));
+
+              // Calculate bounding box and scaling for Live Runs canvas
+              const minX = Math.min(...nodesWithPositions.map((n: any) => n.x));
+              const maxX = Math.max(...nodesWithPositions.map((n: any) => n.x));
+              const minY = Math.min(...nodesWithPositions.map((n: any) => n.y));
+              const maxY = Math.max(...nodesWithPositions.map((n: any) => n.y));
+
+              const workflowWidth = maxX - minX + 128;
+              const workflowHeight = maxY - minY + 56;
+
+              const canvasWidth = 1120;
+              const canvasHeight = 320;
+              const padding = 40;
+              const availableWidth = canvasWidth - padding * 2;
+              const availableHeight = canvasHeight - padding * 2;
+
+              const scaleX = availableWidth / workflowWidth;
+              const scaleY = availableHeight / workflowHeight;
+              const scale = Math.min(scaleX, scaleY, 1);
+
+              const scaledWidth = workflowWidth * scale;
+              const scaledHeight = workflowHeight * scale;
+              const offsetX = (canvasWidth - scaledWidth) / 2 - minX * scale;
+              const offsetY = (canvasHeight - scaledHeight) / 2 - minY * scale;
+
+              // Map nodes to live run format with scaled positions
+              const liveNodes = nodesWithPositions.map((n: any, i: number) => ({
+                id: n.id,
+                label: n.label,
+                type: n.category?.toLowerCase() || "strategic",
+                status: "completed" as Status, // Default to completed for existing runs
+                x: n.x * scale + offsetX,
+                y: n.y * scale + offsetY,
+                artifacts: 0
+              }));
+
+              // Map edges to live run format
+              const liveEdges = fullWorkflow.edges.map((e: any) => ({
+                from: e.fromId,
+                to: e.toId,
+                fromId: e.fromId,
+                toId: e.toId,
+                relationship: e.relationship || "successor"
+              }));
+
+              return {
+                id: wf.id,
+                name: wf.name,
+                nodes: liveNodes,
+                edges: liveEdges,
+                status: wf.status,
+                startedAt: wf.updated_at || wf.created_at
+              };
+            } catch (error) {
+              console.error(`Error loading workflow ${wf.id}:`, error);
+              return null;
+            }
+          });
+
+          const loadedRuns = (await Promise.all(liveRunsPromises)).filter(Boolean);
+          console.log(`Loaded ${loadedRuns.length} live runs`);
+          setLiveRuns(loadedRuns as any[]);
+        }
+      } catch (error) {
+        console.error('Error loading active workflows:', error);
+      }
+    };
+
+    loadActiveWorkflows();
+  }, []); // Run once on mount
 
   // Update live run node status
   const updateLiveRunNode = useCallback((runId: string, nodeId: string, status: Status, artifacts?: number) => {
@@ -2137,9 +2348,402 @@ function WorkflowsView() {
         {tab === "live" ? (
           <SprintCanvas liveRuns={liveRuns} onRefreshStatus={syncGitHubStatus} />
         ) : (
-          <WorkflowDesigner onLaunch={(run) => { setLiveRuns(prev => [run, ...prev]); setTab("live"); }} />
+          <WorkflowDesigner
+            onLaunch={(run) => { setLiveRuns(prev => [run, ...prev]); setTab("live"); }}
+            connectedRepos={connectedRepos}
+          />
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Artifacts View ───────────────────────────────────────────────────────────
+
+const artifactTypes = [
+  { type: "prd", label: "PRD", icon: FileText, color: "#6366f1" },
+  { type: "architecture", label: "Architecture Doc", icon: Network, color: "#f59e0b" },
+  { type: "adr", label: "ADR", icon: ScrollText, color: "#8b5cf6" },
+  { type: "user-story", label: "User Story", icon: BookOpen, color: "#22c55e" },
+  { type: "test-plan", label: "Test Plan", icon: FlaskConical, color: "#a855f7" },
+  { type: "deployment", label: "Deployment Record", icon: Rocket, color: "#3b82f6" },
+  { type: "incident", label: "Incident Report", icon: AlertCircle, color: "#ef4444" },
+  { type: "analysis", label: "Analysis", icon: Search, color: "#06b6d4" },
+];
+
+const mockArtifacts = [
+  { id: "art1", type: "prd", name: "User Authentication Module PRD", version: "v1.3", status: "approved" as const, owner: "Product Strategist (AI)", created: "May 24, 2026", modified: "2h ago", linkedCount: 8, aiConfidence: 0.94 },
+  { id: "art2", type: "architecture", name: "Microservices Architecture HLD", version: "v2.1", status: "pending" as const, owner: "Solution Architect (AI)", created: "May 25, 2026", modified: "1h ago", linkedCount: 12, aiConfidence: 0.89 },
+  { id: "art3", type: "adr", name: "ADR-012: Event Sourcing for Orders", version: "v1.0", status: "approved" as const, owner: "Backend Developer (AI)", created: "May 23, 2026", modified: "1d ago", linkedCount: 5, aiConfidence: 0.92 },
+  { id: "art4", type: "user-story", name: "JWT Refresh Token Implementation", version: "v1.0", status: "approved" as const, owner: "Backend Developer (AI)", created: "May 26, 2026", modified: "3h ago", linkedCount: 4, aiConfidence: 0.96 },
+  { id: "art5", type: "test-plan", name: "Payment Flow E2E Test Plan", version: "v1.2", status: "draft" as const, owner: "QA Engineer (AI)", created: "May 25, 2026", modified: "5h ago", linkedCount: 6, aiConfidence: 0.88 },
+  { id: "art6", type: "deployment", name: "Release v2.4.1 Deployment", version: "v1.0", status: "approved" as const, owner: "DevOps Agent (AI)", created: "May 26, 2026", modified: "1h ago", linkedCount: 3, aiConfidence: 0.95 },
+  { id: "art7", type: "analysis", name: "Code Quality Analysis Report", version: "v1.0", status: "approved" as const, owner: "Code Analyst (AI)", created: "May 26, 2026", modified: "30m ago", linkedCount: 7, aiConfidence: 0.91 },
+];
+
+function ArtifactsView() {
+  const [selectedArtifact, setSelectedArtifact] = useState<string | null>("art1");
+  const [filterType, setFilterType] = useState<string>("All");
+  const [activeTab, setActiveTab] = useState<"overview" | "lineage" | "ai-history" | "comments" | "github" | "logs">("overview");
+
+  const artifact = mockArtifacts.find(a => a.id === selectedArtifact);
+  const artifactType = artifact ? artifactTypes.find(t => t.type === artifact.type) : null;
+  const types = ["All", "PRD", "Architecture", "ADR", "User Story", "Test Plan", "Deployment", "Incident", "Analysis"];
+  const filtered = filterType === "All" ? mockArtifacts : mockArtifacts.filter(a => {
+    const typeLabel = artifactTypes.find(t => t.type === a.type)?.label;
+    return typeLabel === filterType;
+  });
+
+  const statusColors: Record<string, string> = {
+    approved: "text-green-400 bg-green-400/10 border-green-400/20",
+    pending: "text-amber-400 bg-amber-400/10 border-amber-400/20",
+    draft: "text-slate-400 bg-slate-400/10 border-slate-400/20",
+  };
+
+  return (
+    <div className="flex h-full min-h-0 overflow-hidden">
+      {/* LEFT PANEL - Artifact List */}
+      <div className="w-72 flex-shrink-0 flex flex-col gap-4 p-6 border-r border-border overflow-y-auto">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Artifacts</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Structured SDLC documents</p>
+        </div>
+
+        <div className="flex items-center gap-1.5 bg-muted rounded px-2.5 py-1.5">
+          <Search size={11} className="text-muted-foreground" />
+          <input placeholder="Search artifacts…" className="bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none flex-1" />
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          {types.map(t => (
+            <button
+              key={t}
+              onClick={() => setFilterType(t)}
+              className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${filterType === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+
+        <div className="space-y-1.5">
+          {filtered.map(art => {
+            const artType = artifactTypes.find(t => t.type === art.type)!;
+            const Icon = artType.icon;
+            return (
+              <div
+                key={art.id}
+                onClick={() => setSelectedArtifact(art.id)}
+                className={`p-3 rounded-lg cursor-pointer transition-colors border ${selectedArtifact === art.id ? "bg-primary/5 border-primary" : "border-transparent hover:bg-muted/50"}`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <div className="w-7 h-7 rounded flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${artType.color}15` }}>
+                    <Icon size={12} style={{ color: artType.color }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-xs font-semibold text-foreground truncate mb-0.5">{art.name}</h3>
+                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <span>{art.version}</span>
+                      <span>•</span>
+                      <span className={`px-1 py-0.5 rounded ${statusColors[art.status]}`}>
+                        {art.status}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* MAIN CONTENT AREA - Document Editor */}
+      {artifact && artifactType ? (
+        <>
+          <div className="flex-1 flex flex-col overflow-hidden bg-card border-x border-border">
+            {/* Header */}
+            <div className="border-b border-border p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${artifactType.color}15` }}>
+                  <artifactType.icon size={16} style={{ color: artifactType.color }} />
+                </div>
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">{artifact.name}</h2>
+                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
+                    <span>{artifactType.label}</span>
+                    <span>•</span>
+                    <span>{artifact.version}</span>
+                    <span className={`px-1.5 py-0.5 rounded border ${statusColors[artifact.status]}`}>
+                      {artifact.status}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button className="px-2.5 py-1.5 bg-muted text-muted-foreground border border-border rounded text-xs hover:text-foreground transition-colors">
+                  <Edit3 size={11} />
+                </button>
+                <button className="px-2.5 py-1.5 bg-primary text-primary-foreground rounded text-xs font-medium hover:bg-primary/90 transition-colors">
+                  Save
+                </button>
+              </div>
+            </div>
+
+            {/* Main Content Area - Rich Document Editor */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="max-w-4xl mx-auto space-y-6">
+                {/* AI Generation Metadata */}
+                <div className="bg-primary/5 border border-primary/20 rounded-lg p-3">
+                  <div className="flex items-center gap-2 text-xs">
+                    <Bot size={12} className="text-primary" />
+                    <span className="text-foreground font-medium">Generated by {artifact.owner}</span>
+                    <span className="text-muted-foreground">•</span>
+                    <span className="text-muted-foreground">Modified {artifact.modified}</span>
+                    <span className="text-muted-foreground">•</span>
+                    <span className="text-foreground">AI Confidence: {Math.round(artifact.aiConfidence * 100)}%</span>
+                  </div>
+                </div>
+
+                {/* Document Content - Rich Editor Area */}
+                <div className="prose prose-sm max-w-none">
+                  <h1 className="text-foreground">{artifact.name}</h1>
+
+                  <h2 className="text-foreground">Executive Summary</h2>
+                  <p className="text-muted-foreground">
+                    This document outlines the comprehensive approach for implementing a secure, scalable authentication module
+                    that supports multiple authentication strategies including JWT, OAuth 2.0, and SSO integration.
+                  </p>
+
+                  <h2 className="text-foreground">Product Goals</h2>
+                  <ul className="text-muted-foreground">
+                    <li>Enable seamless user authentication across all platform services</li>
+                    <li>Support enterprise SSO requirements (SAML, OIDC)</li>
+                    <li>Implement role-based access control (RBAC) with fine-grained permissions</li>
+                    <li>Ensure compliance with SOC 2, GDPR, and industry security standards</li>
+                  </ul>
+
+                  <h2 className="text-foreground">Technical Specifications</h2>
+                  <p className="text-muted-foreground">
+                    The authentication service will be built as a standalone microservice using Node.js and Express,
+                    with Redis for session management and PostgreSQL for user data persistence.
+                  </p>
+
+                  <h3 className="text-foreground">Architecture Components</h3>
+                  <ul className="text-muted-foreground">
+                    <li><strong>Auth Service API:</strong> RESTful API for authentication operations</li>
+                    <li><strong>Token Service:</strong> JWT generation, validation, and refresh logic</li>
+                    <li><strong>Session Store:</strong> Redis-backed distributed session management</li>
+                    <li><strong>Identity Provider Integration:</strong> OAuth 2.0 and SAML connectors</li>
+                  </ul>
+
+                  <h2 className="text-foreground">Implementation Details</h2>
+                  <pre className="bg-muted p-3 rounded text-xs overflow-x-auto"><code>{`// JWT Token Generation
+const generateAccessToken = (userId: string, roles: string[]) => {
+  return jwt.sign(
+    { sub: userId, roles },
+    process.env.JWT_SECRET,
+    { expiresIn: '15m', issuer: 'agenticsdlc' }
+  );
+};`}</code></pre>
+
+                  <h2 className="text-foreground">Acceptance Criteria</h2>
+                  <ul className="text-muted-foreground">
+                    <li>Users can register and authenticate using email/password</li>
+                    <li>JWT tokens expire after 15 minutes; refresh tokens valid for 7 days</li>
+                    <li>Failed login attempts trigger rate limiting after 5 attempts</li>
+                    <li>All authentication events logged to audit trail</li>
+                    <li>Password requirements: minimum 12 characters, complexity rules enforced</li>
+                  </ul>
+
+                  <h2 className="text-foreground">AI-Generated Insights</h2>
+                  <div className="bg-blue-400/10 border border-blue-400/20 rounded-lg p-3">
+                    <div className="flex items-start gap-2">
+                      <Bot size={14} className="text-blue-400 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-xs text-foreground font-medium mb-1">Security Recommendation</p>
+                        <p className="text-xs text-muted-foreground">
+                          Consider implementing WebAuthn for passwordless authentication to improve security
+                          and user experience. This aligns with modern authentication best practices.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT PANEL - Tabs with Context */}
+          <div className="w-80 flex-shrink-0 bg-card flex flex-col overflow-hidden border-r border-border">
+            {/* Tabs */}
+            <div className="flex border-b border-border">
+              {[
+                { id: "overview" as const, label: "Overview", icon: FileText },
+                { id: "lineage" as const, label: "Lineage", icon: GitBranch },
+                { id: "ai-history" as const, label: "AI History", icon: Bot },
+                { id: "comments" as const, label: "Comments", icon: MessageSquare },
+                { id: "github" as const, label: "GitHub", icon: Github },
+                { id: "logs" as const, label: "Logs", icon: Terminal },
+              ].map(tab => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex-1 flex items-center justify-center gap-1 py-2.5 text-xs font-medium border-b-2 transition-colors ${activeTab === tab.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                    title={tab.label}
+                  >
+                    <Icon size={11} />
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Tab Content */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {activeTab === "overview" && (
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Metadata</div>
+                    <div className="space-y-2">
+                      <div>
+                        <div className="text-[10px] text-muted-foreground mb-0.5">Owner</div>
+                        <div className="text-xs text-foreground">{artifact.owner}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-muted-foreground mb-0.5">Version</div>
+                        <div className="text-xs text-foreground">{artifact.version}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-muted-foreground mb-0.5">Created</div>
+                        <div className="text-xs text-foreground">{artifact.created}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-muted-foreground mb-0.5">AI Confidence</div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="flex-1 h-1.5 bg-border rounded-full overflow-hidden">
+                            <div className="h-full bg-green-400" style={{ width: `${artifact.aiConfidence * 100}%` }} />
+                          </div>
+                          <span className="text-[10px] text-foreground font-medium">{Math.round(artifact.aiConfidence * 100)}%</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Linked Artifacts ({artifact.linkedCount})</div>
+                    <div className="space-y-1.5">
+                      {[
+                        { name: "User Auth Epic", type: "epic", rel: "Parent" },
+                        { name: "JWT Implementation Story", type: "story", rel: "Child" },
+                        { name: "Security ADR-008", type: "adr", rel: "Referenced by" },
+                      ].map((link, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs p-2 rounded hover:bg-muted/50 cursor-pointer border border-transparent hover:border-border">
+                          <GitBranch size={10} className="text-muted-foreground mt-0.5" />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-foreground text-[11px] font-medium truncate">{link.name}</div>
+                            <div className="text-muted-foreground text-[10px]">{link.rel}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Dependencies</div>
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] text-muted-foreground p-2 bg-muted rounded">
+                        <AlertCircle size={10} className="inline mr-1" />
+                        No blocking dependencies
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "lineage" && (
+                <div className="space-y-3">
+                  <div className="text-center py-8">
+                    <GitBranch size={24} className="text-muted-foreground mx-auto mb-2" />
+                    <div className="text-xs font-medium text-foreground mb-1">Artifact Lineage</div>
+                    <div className="text-[10px] text-muted-foreground">Interactive graph visualization</div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "ai-history" && (
+                <div className="space-y-2">
+                  {[
+                    { time: "2h ago", agent: "Product Strategist", action: "Generated version v1.3" },
+                    { time: "1d ago", agent: "Solution Architect", action: "Reviewed and approved" },
+                    { time: "2d ago", agent: "Backend Developer", action: "Generated initial draft v1.0" },
+                  ].map((log, i) => (
+                    <div key={i} className="bg-muted rounded-lg p-2.5">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Bot size={10} className="text-primary" />
+                        <span className="text-[11px] font-medium text-foreground">{log.agent}</span>
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">{log.action}</div>
+                      <div className="text-[10px] text-muted-foreground mt-1">{log.time}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activeTab === "comments" && (
+                <div className="text-center py-8">
+                  <MessageSquare size={24} className="text-muted-foreground mx-auto mb-2" />
+                  <div className="text-xs font-medium text-foreground mb-1">No Comments</div>
+                  <div className="text-[10px] text-muted-foreground">Add collaborative comments</div>
+                </div>
+              )}
+
+              {activeTab === "github" && (
+                <div className="space-y-3">
+                  <div>
+                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Sync Status</div>
+                    <div className="flex items-center gap-2 text-xs p-2 bg-green-400/10 border border-green-400/20 rounded">
+                      <CheckCircle2 size={12} className="text-green-400" />
+                      <span className="text-foreground text-[11px]">Synced to Issue #142</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Linked Resources</div>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 text-xs p-2 rounded hover:bg-muted/50 cursor-pointer">
+                        <GitPullRequest size={11} className="text-blue-400" />
+                        <span className="text-foreground text-[11px]">PR #487</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs p-2 rounded hover:bg-muted/50 cursor-pointer">
+                        <GitCommit size={11} className="text-green-400" />
+                        <span className="text-foreground text-[11px]">feat/jwt-refresh</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "logs" && (
+                <div className="space-y-1 font-mono text-[10px]">
+                  <div className="text-green-400">[14:32:11] Generated successfully</div>
+                  <div className="text-blue-400">[14:32:15] AI validated (94%)</div>
+                  <div className="text-green-400">[14:32:18] Synced to GitHub</div>
+                  <div className="text-amber-400">[14:35:42] Version v1.3 created</div>
+                  <div className="text-green-400">[14:35:45] Approval requested</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="flex-1 flex items-center justify-center text-muted-foreground">
+          <div className="text-center">
+            <FileText size={32} className="mx-auto mb-3 opacity-50" />
+            <div className="text-sm font-medium">No artifact selected</div>
+            <div className="text-xs mt-1">Select an artifact from the list to view details</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3042,6 +3646,7 @@ const navSections = [
       { id: "agents" as ViewId, label: "Agents", icon: Bot },
       { id: "workflows" as ViewId, label: "Workflow Runs", icon: Workflow },
       { id: "approvals" as ViewId, label: "Approvals", icon: CheckSquare, badge: "7" },
+      { id: "artifacts" as ViewId, label: "Artifacts", icon: FileText },
       { id: "context-graph" as ViewId, label: "Context Graph", icon: Network },
     ],
   },
@@ -3145,10 +3750,10 @@ function TopNav({ active }: { active: ViewId }) {
     dashboard: "Dashboard", discovery: "Product Discovery", planning: "Planning & Requirements",
     architecture: "Architecture", development: "Development", qa: "QA & Validation",
     deployment: "Deployment Center", observability: "Observability", agents: "AI Agents",
-    workflows: "Workflow Runs", approvals: "Approvals", "context-graph": "Context Graph",
-    repositories: "Repositories", issues: "Issues & Projects", "pull-requests": "Pull Requests",
-    pipelines: "CI/CD Pipelines", policies: "Policies", audit: "Audit Logs",
-    security: "Security", settings: "Settings",
+    workflows: "Workflow Runs", approvals: "Approvals", artifacts: "Artifact Workspace",
+    "context-graph": "Context Graph", repositories: "Repositories", issues: "Issues & Projects",
+    "pull-requests": "Pull Requests", pipelines: "CI/CD Pipelines", policies: "Policies",
+    audit: "Audit Logs", security: "Security", settings: "Settings",
   };
 
   return (
@@ -3236,6 +3841,7 @@ export default function App() {
       case "workflows":   return <WorkflowsView />;
       case "agents":      return <AgentsView />;
       case "approvals":   return <ApprovalsView />;
+      case "artifacts":   return <ArtifactsView />;
       case "context-graph": return <ContextGraphView />;
       case "repositories":
       case "pull-requests":
