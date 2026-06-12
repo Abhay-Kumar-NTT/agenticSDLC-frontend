@@ -163,9 +163,12 @@ export async function updateRepository(
   }
 }
 
+export const createRepository = connectRepository;
+
 export default {
   getAllRepositories,
   connectRepository,
+  createRepository: connectRepository,
   disconnectRepository,
   updateRepository,
 };

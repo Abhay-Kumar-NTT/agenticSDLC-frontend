@@ -101,12 +101,12 @@ export function GithubView({ initialTab }: { initialTab?: "repos" | "prs" | "iss
         fullName: `${repoOwner}/${repoName}`,
         name: repoName,
         owner: repoOwner,
+        url: repoData.html_url || `https://github.com/${repoOwner}/${repoName}`,
         description: repoData.description || '',
         language: repoData.language || 'Unknown',
         stars: repoData.stargazers_count || 0,
-        forks: repoData.forks_count || 0,
-        openIssues: repoData.open_issues_count || 0,
-        lastPush: repoData.pushed_at || new Date().toISOString()
+        branches: repoData.default_branch ? 1 : 0,
+        status: 'active',
       });
 
       if (saveResponse.success && saveResponse.data) {
